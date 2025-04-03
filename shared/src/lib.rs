@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use chrono::serde::ts_seconds;
 
 /// # TemperatureWithHumidity
 ///
 /// Struct representing temperature and humidity readings from a DHT sensor.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TemperatureWithHumidity {
     pub temperature: f32,
     pub humidity: f32,
@@ -22,7 +22,7 @@ pub struct TemperatureWithHumidity {
 ///   Represents both temperature and humidity readings.
 /// - `LightValue(f32)`:  
 ///   Represents a light intensity reading (in lux).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Telemetry {
     Temperature(f32),
     TemperatureWithHumidity(TemperatureWithHumidity),
@@ -39,9 +39,20 @@ pub enum Telemetry {
 ///   The timestamp of when the data was collected. This field uses the `ts_seconds` format for serialization.
 /// - `telemetry`:  
 ///   The telemetry data associated with the sensor reading (temperature, humidity, or light value).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SensorData {
     #[serde(with = "ts_seconds")]
     pub timestamp: DateTime<Utc>,
     pub telemetry: Telemetry,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Updates {
+    pub sensor1_enable: Option<bool>,
+    pub sensor2_enable: Option<bool>,
+    pub sensor3_enable: Option<bool>,
+    pub sensor4_enable: Option<bool>,
+    pub disable_telemetry: Option<bool>,
+    #[serde(skip)]
+    pub telemetry_interval: Option<u32>,
 }
