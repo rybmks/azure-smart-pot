@@ -4,3 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+shared = { path = "../shared" }
+azure_iot_sdk = { version = "0.8.0", features = ["with-provision", "c2d-messages", "direct-methods", "twin-properties", "error-handling-messages"], default-features = false }
+tokio = { version = "1.44.1", features = ["rt"] }
+mod_interface = { workspace = true }
+chrono = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+env_logger = "0.11.8"
+config = "0.15.11"
+dotenv = "0.15.0"
+reqwest = { version = "0.12.15", features = ["json"] }
