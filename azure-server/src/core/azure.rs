@@ -3,11 +3,11 @@ mod private {
     use crate::core::Error;
     use azure_iot_sdk::Message;
     use azure_iot_sdk::{DeviceKeyTokenSource, IoTHubClient};
+    use shared::SensorData;
     use shared::Updates;
     use reqwest;
     use log::{error, info};
     use serde_json::json;
-    use shared::Telemetry;
     use tokio::sync::watch;
     use tokio::time::{self, Duration};
     use azure_iot_sdk::{DirectMethodResponse, MessageType};
@@ -199,7 +199,7 @@ mod private {
                             let text = response.text().await?;
                             error!("Error requesting telemetry: {}", text);
                         } else {
-                            let telemetry = response.json::<Telemetry>().await?;
+                            let telemetry = response.json::<SensorData>().await?;
                             info!("Send telemetry with id: {} to Azure portal", count);
     
                             let msg = Message::builder()
