@@ -48,11 +48,12 @@ pub struct SensorData {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Updates {
-    pub sensor1_enable: Option<bool>,
-    pub sensor2_enable: Option<bool>,
-    pub sensor3_enable: Option<bool>,
-    pub sensor4_enable: Option<bool>,
-    pub disable_telemetry: Option<bool>,
+    // pub sensor1_enable: Option<bool>,
+    // pub sensor2_enable: Option<bool>,
+    // pub sensor3_enable: Option<bool>,
+    // pub sensor4_enable: Option<bool>,
+    // pub disable_telemetry: Option<bool>,
+    pub convert_to_far: Option<bool>,
     #[serde(skip)]
     pub telemetry_interval: Option<u32>,
 }

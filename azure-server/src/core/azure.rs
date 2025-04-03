@@ -39,11 +39,6 @@ mod private {
             .map_err(|err| Error::HubError(err.to_string()))
     }
 
-    fn parse_cloud_message(message: Message) -> Result<Updates> {
-        let updates: Updates = serde_json::from_slice(&message.body)?;
-        Ok(updates)
-    }
-
     pub async fn run() -> Result<()> {
         let base_url = std::env::var("BASE_URL")?;
         let base_url = base_url.as_str();
@@ -71,7 +66,7 @@ mod private {
                         MessageType::C2DMessage(msg) => {
                             info!("Received C2D message {:?}", msg);
     
-                            let updates = parse_cloud_message(msg)?;
+                            let updates: Updates = serde_json::from_slice(&msg.body)?;
                             if let Some(num) = updates.telemetry_interval {
                                 // Update the interval using watch channel
                                 interval_tx.send(num as u64).ok();
@@ -94,26 +89,29 @@ mod private {
                         },
                         MessageType::DirectMethod(msg) => {
                             info!("Received direct method {:?}", msg);
-    
-                            match msg.method_name.eq_ignore_ascii_case("Light") {
-                                true => {
-                                    let endpoint = format!("{}/direct-method", base_url);
-                                    let response = reqwest::Client::new()
-                                        .post(&endpoint)
-                                        .body(msg.method_name.clone())
-                                        .send()
-                                        .await?;
-    
-                                    let status = response.status();
-                                    let text = response.text().await?;
-                                    if !status.is_success() {
-                                        error!("Direct method error: {}", text);
-                                    } else {
-                                        info!("Direct method response: {}", text);
-                                    }
-                                },
-                                false => error!("No such direct method: {}", msg.method_name),
+
+                            let endpoint = if msg.method_name.eq_ignore_ascii_case("light-on") {
+                                format!("{}/direct-method/light-on", base_url)
+                            } else if msg.method_name.eq_ignore_ascii_case("light-off") {
+                                format!("{}/direct-method/light-off", base_url)
+                            } else {
+                                error!("No such direct method: {}", msg.method_name);
+                                continue;
                             };
+                            
+                            let response = reqwest::Client::new()
+                                .post(&endpoint)
+                                .body(msg.method_name.clone())
+                                .send()
+                                .await?;
+
+                            let status = response.status();
+                            let text = response.text().await?;
+                            if !status.is_success() {
+                                error!("Direct method error: {}", text);
+                            } else {
+                                info!("Direct method response: {}", text);
+                            }
     
                             if let Err(err) = recv_client
                                 .respond_to_direct_method(DirectMethodResponse::new(
@@ -131,7 +129,7 @@ mod private {
                         MessageType::DesiredPropertyUpdate(msg) => {
                             info!("Desired properties updated {:?}", msg);
     
-                            let updates = parse_cloud_message(msg)?;
+                            let updates: Updates = serde_json::from_slice(&msg.body)?;
                             if let Some(num) = updates.telemetry_interval {
                                 // Update interval
                                 interval_tx.send(num as u64).ok();
