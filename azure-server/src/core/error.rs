@@ -17,9 +17,6 @@ mod private {
     /// Custom error type for the application.
     #[derive(Error, Debug)]
     pub enum Error {
-        /// Represents errors that occur during I/O operations.
-        #[error("IO error:\n{0}")]
-        IoError(#[from] std::io::Error),
 
         /// Represents errors that occur when accessing environment variables.
         #[error("{0}")]
@@ -29,13 +26,9 @@ mod private {
         #[error("{0}")]
         HubError(String),
 
-        /// Represents errors that occur during JSON parsing.
+        /// Represents error related to int parse error.
         #[error("{0}")]
-        ParseError(#[from] serde_json::Error),
-
-        /// Represents errors that occur during HTTP requests.
-        #[error("{0}")]
-        ReqwestError(#[from] reqwest::Error)
+        ParseError(#[from] std::num::ParseIntError)
     }
 }
 

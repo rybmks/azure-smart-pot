@@ -5,18 +5,16 @@
 //! as well as the main logic for processing incoming messages and sending telemetry data.
 
 mod private {
-    use crate::core::Result;
-    use crate::core::Error;
-    use azure_iot_sdk::Message;
-    use azure_iot_sdk::{DeviceKeyTokenSource, IoTHubClient};
-    use shared::SensorData;
-    use shared::Updates;
+    use crate::core::{Result, Error, Updates};
+
+    use azure_iot_sdk::{DirectMethodResponse, MessageType};
+    use azure_iot_sdk::{DeviceKeyTokenSource, IoTHubClient, Message};
+    
     use reqwest;
     use log::{error, info};
     use serde_json::json;
     use tokio::sync::watch;
     use tokio::time;
-    use azure_iot_sdk::{DirectMethodResponse, MessageType};
 
     /// ## get_hub
     ///
@@ -95,16 +93,17 @@ mod private {
     ///
     /// ## Returns
     /// Returns `(Result<()>, Result<()>)` results of loops.
-    pub async fn run() -> (Result<()>, Result<()>) {
-        let base_url = std::env::var("BASE_URL")?;
-        let base_url = base_url.as_str();
-        
+    pub async fn run(base_url: &str) -> (Result<()>, Result<()>) {
         // Initial interval value
         let initial_interval = 5_u64;
         // Creating a watch channel for interval updates
         let (interval_tx, mut interval_rx) = watch::channel::<u64>(initial_interval);
     
-        let mut client = get_hub_with_dps().await?;
+        let mut client = match get_hub_with_dps().await {
+            Ok(client) => client,
+            Err(err) => return (Err(err), Ok(()))
+        };
+
         info!("Initialized client");
     
         // -------------------------------
@@ -125,7 +124,7 @@ mod private {
                             let updates: Updates = match serde_json::from_slice(&msg.body) {
                                 Ok(val) => val,
                                 Err(err) => {
-                                    error!("Failed to deserialize cloud to device message");
+                                    error!("Failed to deserialize cloud to device message: {}", err);
                                     continue;
                                 }
                             };
@@ -145,7 +144,10 @@ mod private {
                                 .await
                             {
                                 Ok(res) => res,
-                                Err(err) => error!("Failed send message to device: {}", err),
+                                Err(err) => {
+                                    error!("Failed send message to device: {}", err);
+                                    continue;
+                                },
                             };
                             
                             let status = response.status();
@@ -175,8 +177,11 @@ mod private {
                                 .await
                             {
                                 Ok(res) => res,
-                                Err(err) => error!("Failed send message to device: {}", err),
-                            };;
+                                Err(err) => {
+                                    error!("Failed send message to device: {}", err);
+                                    continue;
+                                },
+                            };
 
                             let status = response.status();
                             if !status.is_success() {
@@ -202,7 +207,13 @@ mod private {
                         MessageType::DesiredPropertyUpdate(msg) => {
                             info!("Desired properties updated {:?}", msg);
     
-                            let updates: Updates = serde_json::from_slice(&msg.body)?;
+                            let updates: Updates = match serde_json::from_slice(&msg.body) {
+                                Ok(val) => val,
+                                Err(err) => {
+                                    error!("Parse error: {}", err);
+                                    continue;
+                                }
+                            };
                             if let Some(num) = updates.telemetry_interval {
                                 // Update interval
                                 info!("Updated interval to {}!", num);
@@ -314,7 +325,7 @@ mod private {
             }
     
             #[allow(unreachable_code)]
-            Ok::<(), Box<dyn std::error::Error>>(())
+            Ok::<(), Error>(())
         };
     
         // Start both loops concurrently
