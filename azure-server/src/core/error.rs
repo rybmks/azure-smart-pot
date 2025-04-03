@@ -10,7 +10,13 @@ mod private {
         EnvError(#[from] std::env::VarError),
 
         #[error("{0}")]
-        HubError(String)
+        HubError(String),
+
+        #[error("{0}")]
+        ParseError(#[from] serde_json::Error),
+
+        #[error("{0}")]
+        ReqwestError(#[from] reqwest::Error)
     }
 }
 
