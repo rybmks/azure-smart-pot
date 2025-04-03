@@ -2,6 +2,11 @@
 members = ["azure-server", "esp32-pot", "shared"]
 resolver = "2"
 
+[features]
+esp32-pot = []
+azure-server = []
+shared = []
+
 [workspace.dependencies]
 mod_interface = "0.30.0"
 serde = { version = "1.0.219", features = ["derive"] }
