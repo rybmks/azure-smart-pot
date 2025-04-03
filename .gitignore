@@ -19,4 +19,13 @@ target/
 # Added by cargo
 
 /target
+
+
+/target
 .env
+Cargo.lock
+Config.toml
+.embuild
+.github
+.env
+
