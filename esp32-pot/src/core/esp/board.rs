@@ -4,7 +4,7 @@
 
 mod private {
     use crate::core::esp::{Bh1750, DhtConfig, DhtSensor, Ds18B20Sensor, Sensor, wifi};
-    use crate::core::{Result, SmartPotError};
+    use crate::core::{Result, SmartPotError, Telemetry};
     use esp_idf_hal::delay::FreeRtos;
     use esp_idf_hal::gpio::Output;
     use esp_idf_hal::gpio::{AnyIOPin, OutputPin, PinDriver};
@@ -44,6 +44,7 @@ mod private {
         pub wifi: AsyncWifi<EspWifi<'static>>,
         pub sensors: Vec<Box<dyn Sensor<'static> + Send>>,
         pub light_pin: PinDriver<'static, T, Output>,
+        pub is_fahrenheit: bool,
     }
 
     /// # BoardBuilder
@@ -163,6 +164,7 @@ mod private {
                 wifi,
                 sensors: self.sensors,
                 light_pin: light_driver,
+                is_fahrenheit: false,
             })
         }
     }
@@ -183,6 +185,20 @@ mod private {
             self.light_pin.set_low().map_err(SmartPotError::EspError)
         }
 
+        /// Sets whether the temperature readings should be displayed in Fahrenheit.
+        ///
+        /// This method allows toggling between displaying temperatures in Celsius or Fahrenheit.
+        /// When `is_fahrenheit` is set to `true`, temperatures will be shown in Fahrenheit. Otherwise,
+        /// the temperatures are displayed in Celsius.
+        ///
+        /// # Parameters
+        /// - `is_fahrenheit`: A boolean value. If `true`, the temperature will be displayed in Fahrenheit;
+        ///   if `false`, it will be in Celsius.
+        ///
+        pub fn set_is_fahrenheit(&mut self, is_fahrenheit: bool) {
+            self.is_fahrenheit = is_fahrenheit;
+        }
+
         /// Retrieves telemetry data from all connected sensors with 3 retry attempts.
         ///
         /// # Returns
@@ -195,7 +211,25 @@ mod private {
                 .filter_map(|sensor| {
                     for i in 1..=3 {
                         match sensor.read_data() {
-                            Ok(data) => {
+                            Ok(mut data) => {
+                                if self.is_fahrenheit {
+                                    match data.telemetry {
+                                        Telemetry::LightValue(_) => {}
+                                        Telemetry::Temperature(ref mut temperature_data) => {
+                                            *temperature_data =
+                                                (*temperature_data * 9.0 / 5.0) + 32.0;
+                                        }
+                                        Telemetry::TemperatureWithHumidity(
+                                            ref mut temperature_with_humidity_data,
+                                        ) => {
+                                            temperature_with_humidity_data.temperature =
+                                                (temperature_with_humidity_data.temperature * 9.0
+                                                    / 5.0)
+                                                    + 32.0;
+                                        }
+                                    }
+                                }
+
                                 log::info!("Sensor #{} => {:?}", sensor.get_name(), data);
                                 return Some(data);
                             }

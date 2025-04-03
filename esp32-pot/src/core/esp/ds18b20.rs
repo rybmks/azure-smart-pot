@@ -54,26 +54,9 @@ mod private {
             let mut ds_sensors: Vec<ds18b20::Ds18b20> = Vec::new();
 
             {
-                // let mut wire_bus_locked: Result<()> = one_wire_bus.lock(|&wire_bus_locked| {
-                //     while let Some((device_address, state)) = wire_bus_locked
-                //         .device_search(search_state.as_ref(), false, &mut delay)
-                //         .map_err(|e| SmartPotError::OneWireError(e.into()))?
-                //     {
-                //         search_state = Some(state);
-
-                //         if device_address.family_code() != ds18b20::FAMILY_CODE {
-                //             continue;
-                //         }
-
-                //         log::trace!("Found ds18b20: {:?}", device_address);
-                //         let sensor = ds18b20::Ds18b20::new::<EspError>(device_address)
-                //             .map_err(|e| SmartPotError::OneWireError(e.into()))?;
-
-                //         ds_sensors.push(sensor);
-                //     }
-                //     Ok(())
-                // });
-                let mut wire_bus_locked = one_wire_bus.lock().unwrap();
+                let mut wire_bus_locked = one_wire_bus
+                    .lock()
+                    .map_err(|_| SmartPotError::MutexError())?;
 
                 while let Some((device_address, state)) = wire_bus_locked
                     .device_search(search_state.as_ref(), false, &mut delay)
@@ -129,7 +112,11 @@ mod private {
         fn read_data(&mut self) -> Result<SensorData> {
             let mut delay = esp_idf_hal::delay::Delay::new_default();
 
-            let mut locked_wire_bus = self.one_wire_bus.lock().unwrap();
+            let mut locked_wire_bus = self
+                .one_wire_bus
+                .lock()
+                .map_err(|_| SmartPotError::MutexError())?;
+
             ds18b20::start_simultaneous_temp_measurement(&mut locked_wire_bus, &mut delay)
                 .map_err(|e| SmartPotError::OneWireError(e.into()))?;
 

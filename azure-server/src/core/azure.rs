@@ -5,18 +5,15 @@
 //! as well as the main logic for processing incoming messages and sending telemetry data.
 
 mod private {
-    use crate::core::Result;
-    use crate::core::Error;
-    use azure_iot_sdk::Message;
-    use azure_iot_sdk::{DeviceKeyTokenSource, IoTHubClient};
-    use shared::SensorData;
-    use shared::Updates;
+    use crate::core::{Result, Error, Updates};
+
+    use azure_iot_sdk::{DirectMethodResponse, MessageType};
+    use azure_iot_sdk::{DeviceKeyTokenSource, IoTHubClient, Message};
+    
     use reqwest;
     use log::{error, info};
-    use serde_json::json;
     use tokio::sync::watch;
     use tokio::time;
-    use azure_iot_sdk::{DirectMethodResponse, MessageType};
 
     /// ## get_hub
     ///
@@ -95,16 +92,15 @@ mod private {
     ///
     /// ## Returns
     /// Returns `(Result<()>, Result<()>)` results of loops.
-    pub async fn run() -> (Result<()>, Result<()>) {
-        let base_url = std::env::var("BASE_URL")?;
-        let base_url = base_url.as_str();
-        
-        // Initial interval value
+    pub async fn run(base_url: &str) -> (Result<()>, Result<()>) {
         let initial_interval = 5_u64;
-        // Creating a watch channel for interval updates
         let (interval_tx, mut interval_rx) = watch::channel::<u64>(initial_interval);
     
-        let mut client = get_hub_with_dps().await?;
+        let mut client = match get_hub_with_dps().await {
+            Ok(client) => client,
+            Err(err) => return (Err(err), Ok(()))
+        };
+
         info!("Initialized client");
     
         // -------------------------------
@@ -116,7 +112,7 @@ mod private {
         // - recv_client
         // - interval_tx (interval updating)
         let receive_loop = async move {
-        info!("Started reveive loop.");
+        info!("Started receive loop.");
            
             loop {
                 while let Some(msg) = receiver.recv().await {
@@ -125,27 +121,33 @@ mod private {
                             let updates: Updates = match serde_json::from_slice(&msg.body) {
                                 Ok(val) => val,
                                 Err(err) => {
-                                    error!("Failed to deserialize cloud to device message");
+                                    error!("Failed to deserialize cloud to device message: {}", err);
                                     continue;
                                 }
                             };
                             info!("Received C2D message  {:?}", updates);
     
                             if let Some(num) = updates.telemetry_interval {
-                                // Update the interval using watch channel
                                 info!("Updated interval to {}!", num);
                                 interval_tx.send(num as u64).ok();
                             }
 
-                            let endpoint = format!("{}/c2d", base_url);
+                            let endpoint = match updates.convert_to_far {
+                                Some(true) => format!("{}/c2d/far", base_url),
+                                Some(false) => format!("{}/c2d/cel", base_url),
+                                None => continue
+                            };
+
                             let response = match reqwest::Client::new()
                                 .post(&endpoint)
-                                .json(&json!(updates))
                                 .send()
                                 .await
                             {
                                 Ok(res) => res,
-                                Err(err) => error!("Failed send message to device: {}", err),
+                                Err(err) => {
+                                    error!("Failed send message to device: {}", err);
+                                    continue;
+                                },
                             };
                             
                             let status = response.status();
@@ -175,8 +177,11 @@ mod private {
                                 .await
                             {
                                 Ok(res) => res,
-                                Err(err) => error!("Failed send message to device: {}", err),
-                            };;
+                                Err(err) => {
+                                    error!("Failed send message to device: {}", err);
+                                    continue;
+                                },
+                            };
 
                             let status = response.status();
                             if !status.is_success() {
@@ -199,41 +204,12 @@ mod private {
                                 error!("Error responding to direct method: {}", err);
                             }
                         },
-                        MessageType::DesiredPropertyUpdate(msg) => {
-                            info!("Desired properties updated {:?}", msg);
-    
-                            let updates: Updates = serde_json::from_slice(&msg.body)?;
-                            if let Some(num) = updates.telemetry_interval {
-                                // Update interval
-                                info!("Updated interval to {}!", num);
-                                interval_tx.send(num as u64).ok();
-                            }
-    
-                            let endpoint = format!("{}/desired-props", base_url);
-                            let response = match reqwest::Client::new()
-                                .post(&endpoint)
-                                .json(&json!(updates))
-                                .send()
-                                .await
-                            {
-                                Ok(res) => res,
-                                Err(err) => {
-                                    error!("Failed to send desired properties: {}", err);
-                                    continue;
-                                }
-                            };
-                            
-                            let status = response.status();
-                            if !status.is_success() {
-                                match response.text().await {
-                                    Ok(text) => info!("Desired properties error: {}", text),
-                                    Err(err) => error!("Parse error: {}", err)
-                                };
-                            }
+                        MessageType::DesiredPropertyUpdate(_msg) => {
+                            error!("Desired properties are not set yet!");
                         },
                         MessageType::ErrorReceive(err) => {
                             error!("Error during receive {:?}", err);
-                        }
+                        },
                     }
                 }
             }
@@ -251,30 +227,18 @@ mod private {
 
             info!("Started telemetry loop.");
             loop {
-                // The current interval (in seconds)
                 let current_interval = *interval_rx.borrow();
     
-                // Trying to wait either for a timeout or for the channel to change
-                // If the interval wasn't changed, we'll send telemetry in current_interval seconds
                 info!("Waiting for timeout");
                 match time::timeout(time::Duration::from_secs(current_interval), interval_rx.changed()).await {
-                    // 1) The channel changed before the timeout
                     Ok(Ok(())) => {
-                        // That means a new value appeared in interval_rx
-                        // We simply move on to the next iteration of the loop
-                        // and then use the new current_interval
-                        // (retrieved on the next iteration)
                         continue;
                     },
-                    // 2) The channel was closed
                     Ok(Err(_closed)) => {
                         error!("Interval watch channel closed unexpectedly");
                         break;
                     },
-                    // 3) The timeout fired (the interval was not changed),
-                    // so it's time to send telemetry
                     Err(_timeout) => {
-                        // Request telemetry data
                         let endpoint = format!("{}/telemetry", base_url);
                         let response = match reqwest::get(endpoint).await {
                             Ok(res) => res,
@@ -314,10 +278,9 @@ mod private {
             }
     
             #[allow(unreachable_code)]
-            Ok::<(), Box<dyn std::error::Error>>(())
+            Ok::<(), Error>(())
         };
     
-        // Start both loops concurrently
         tokio::join!(receive_loop, telemetry_sender)
     }
 }

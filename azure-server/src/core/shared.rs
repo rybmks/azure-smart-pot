@@ -84,5 +84,5 @@ crate::mod_interface! {
         SensorData,
         Telemetry,
         TemperatureWithHumidity
-    }
+    };
 }

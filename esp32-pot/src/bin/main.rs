@@ -64,7 +64,7 @@ async fn async_main() -> Result<()> {
     // GET / — telemetry JSON
     {
         let board = Arc::clone(&board);
-        server.fn_handler("/", embedded_svc::http::Method::Get, move |req| {
+        server.fn_handler("/telemetry", embedded_svc::http::Method::Get, move |req| {
             let mut res = match req.into_ok_response() {
                 Ok(r) => r,
                 Err(e) => {
@@ -92,29 +92,66 @@ async fn async_main() -> Result<()> {
     // POST /light/on
     {
         let board = Arc::clone(&board);
-        server.fn_handler("/light/on", embedded_svc::http::Method::Post, move |_| {
-            if let Ok(mut board) = board.lock() {
-                board.light_on()?;
-            } else {
-                error!("Board lock failed on /light/on");
-                return Err(SmartPotError::MutexError());
-            }
-
-            Ok::<(), SmartPotError>(())
-        })?;
+        server.fn_handler(
+            "/direct-method/light-on",
+            embedded_svc::http::Method::Post,
+            move |_| {
+                if let Ok(mut board) = board.lock() {
+                    board.light_on()?;
+                } else {
+                    error!("Board lock failed on /light/on");
+                    return Err(SmartPotError::MutexError());
+                }
+                info!("Light on.");
+                Ok::<(), SmartPotError>(())
+            },
+        )?;
     }
 
     // POST /light/off
     {
         let board = Arc::clone(&board);
-        server.fn_handler("/light/off", embedded_svc::http::Method::Post, move |_| {
+        server.fn_handler(
+            "/direct-method/light-off",
+            embedded_svc::http::Method::Post,
+            move |_| {
+                if let Ok(mut board) = board.lock() {
+                    board.light_off()?;
+                } else {
+                    return Err(SmartPotError::MutexError());
+                }
+                info!("Light off.");
+                Ok(())
+            },
+        )?;
+    }
+
+    // POST /c2d/far
+    {
+        let board = Arc::clone(&board);
+        server.fn_handler("/c2d/far", embedded_svc::http::Method::Post, move |_| {
             if let Ok(mut board) = board.lock() {
-                board.light_off()?;
+                board.set_is_fahrenheit(true);
             } else {
                 return Err(SmartPotError::MutexError());
             }
+            info!("Temperature metrics set to fahrenheit");
 
-            Ok(())
+            Ok::<(), SmartPotError>(())
+        })?;
+    }
+
+    // POST /c2d/cel
+    {
+        let board = Arc::clone(&board);
+        server.fn_handler("/c2d/cel", embedded_svc::http::Method::Post, move |_| {
+            if let Ok(mut board) = board.lock() {
+                board.set_is_fahrenheit(false);
+            } else {
+                return Err(SmartPotError::MutexError());
+            }
+            info!("Temperature metrics set to сelsius");
+            Ok::<(), SmartPotError>(())
         })?;
     }
 
