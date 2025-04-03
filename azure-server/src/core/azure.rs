@@ -60,13 +60,17 @@ mod private {
         // - recv_client
         // - interval_tx (interval updating)
         let receive_loop = async move {
+            info!("Started reveive loop.");
+
             loop {
                 while let Some(msg) = receiver.recv().await {
                     match msg {
                         MessageType::C2DMessage(msg) => {
-                            info!("Received C2D message {:?}", msg);
-    
+                            // info!("Received C2D message {:?}", msg);
+                            
                             let updates: Updates = serde_json::from_slice(&msg.body)?;
+                            info!("{:?}", updates);
+
                             if let Some(num) = updates.telemetry_interval {
                                 // Update the interval using watch channel
                                 interval_tx.send(num as u64).ok();
@@ -152,7 +156,7 @@ mod private {
                         },
                         MessageType::ErrorReceive(err) => {
                             error!("Error during receive {:?}", err);
-                        }
+                        },
                     }
                 }
             }
@@ -167,6 +171,7 @@ mod private {
         let mut temp_client = client.clone();
         let telemetry_sender = async move {
             let mut count = 0u32;
+            info!("Started telemetry loop.");
     
             loop {
                 // The current interval (in seconds)
@@ -220,7 +225,8 @@ mod private {
         };
     
         // Start both loops concurrently
-        let (receive_res, telemetry_res) = tokio::join!(receive_loop, telemetry_sender);
+        let (receive_res, telemetry_res) 
+            = tokio::join!(receive_loop, telemetry_sender);
     
         if let Err(e) = receive_res {
             error!("Receive loop failed: {:?}", e);
