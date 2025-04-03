@@ -1,3 +1,9 @@
+//! azure.rs
+//!
+//! This module is responsible for establishing a connection to the Azure IoT Hub and handling messages.
+//! It provides functions to connect to the IoT Hub directly or via the Device Provisioning Service (DPS),
+//! as well as the main logic for processing incoming messages and sending telemetry data.
+
 mod private {
     use crate::core::Result;
     use crate::core::Error;
@@ -9,9 +15,24 @@ mod private {
     use log::{error, info};
     use serde_json::json;
     use tokio::sync::watch;
-    use tokio::time::{self, Duration};
+    use tokio::time;
     use azure_iot_sdk::{DirectMethodResponse, MessageType};
 
+    /// ## get_hub
+    ///
+    /// Connects directly to the Azure IoT Hub.
+    ///
+    /// This function uses the following environment variables:
+    /// - `IOTHUB_HOSTNAME` – the IoT Hub hostname.
+    /// - `DEVICE_ID` – the device identifier.
+    /// - `SHARED_ACCESS_KEY` – the shared access key.
+    ///
+    /// ## Errors
+    /// - Returns an error if any required environment variable is missing.
+    /// - Returns an error if the IoT Hub client initialization fails.
+    ///
+    /// ## Returns
+    /// Returns an instance of `IoTHubClient` upon a successful connection.
     #[allow(unused)]
     async fn get_hub() -> Result<IoTHubClient> {
         let hostname = std::env::var("IOTHUB_HOSTNAME")?;
@@ -29,22 +50,57 @@ mod private {
             .map_err(|err| Error::HubError(err.to_string()))
     }
     
+    /// ## get_hub_with_dps
+    ///
+    /// Connects to the Azure IoT Hub using the Device Provisioning Service (DPS).
+    ///
+    /// This function uses the following environment variables:
+    /// - `SCOPE_ID` – the DPS scope identifier.
+    /// - `DEVICE_ID` – the device identifier.
+    /// - `DEVICE_KEY` – the device key.
+    ///
+    /// ## Errors
+    /// - Returns an error if any required environment variable is missing.
+    /// - Returns an error if the connection to the IoT Hub via DPS fails.
+    ///
+    /// ## Returns
+    /// Returns an instance of `IoTHubClient` upon a successful connection.
     async fn get_hub_with_dps() -> Result<IoTHubClient> {
         let scope_id = std::env::var("SCOPE_ID")?;
         let device_id = std::env::var("DEVICE_ID")?;
         let device_key = std::env::var("DEVICE_KEY")?;
-    
+
         IoTHubClient::from_provision_service(&scope_id, device_id, &device_key, 4)
             .await
             .map_err(|err| Error::HubError(err.to_string()))
     }
 
-    pub async fn run() -> Result<()> {
+    /// ## run
+    ///
+    /// Main function that contains the overall logic of the module.
+    ///
+    /// This function performs the following tasks:
+    /// - Retrieves the base URL from the `BASE_URL` environment variable.
+    /// - Creates a watch channel to dynamically update the telemetry interval.
+    /// - Establishes a connection to the IoT Hub using DPS via the `get_hub_with_dps` function.
+    /// - Launches two asynchronous loops:
+    ///   1. `receive_loop` – handles incoming messages (Cloud-to-Device, direct method, desired property updates).
+    ///   2. `telemetry_sender_loop` – sends telemetry data by periodically requesting data from the device.
+    ///
+    /// When a message with an updated telemetry interval is received, the new interval is sent through the watch channel.
+    ///
+    /// ## Errors
+    /// - Returns an error if the `BASE_URL` environment variable is missing.
+    /// - May return errors if connecting to the IoT Hub or processing messages fails.
+    ///
+    /// ## Returns
+    /// Returns `(Result<()>, Result<()>)` results of loops.
+    pub async fn run() -> (Result<()>, Result<()>) {
         let base_url = std::env::var("BASE_URL")?;
         let base_url = base_url.as_str();
         
         // Initial interval value
-        let initial_interval = 60_u64;
+        let initial_interval = 5_u64;
         // Creating a watch channel for interval updates
         let (interval_tx, mut interval_rx) = watch::channel::<u64>(initial_interval);
     
@@ -60,31 +116,44 @@ mod private {
         // - recv_client
         // - interval_tx (interval updating)
         let receive_loop = async move {
+        info!("Started reveive loop.");
+           
             loop {
                 while let Some(msg) = receiver.recv().await {
                     match msg {
                         MessageType::C2DMessage(msg) => {
-                            info!("Received C2D message {:?}", msg);
+                            let updates: Updates = match serde_json::from_slice(&msg.body) {
+                                Ok(val) => val,
+                                Err(err) => {
+                                    error!("Failed to deserialize cloud to device message");
+                                    continue;
+                                }
+                            };
+                            info!("Received C2D message  {:?}", updates);
     
-                            let updates: Updates = serde_json::from_slice(&msg.body)?;
                             if let Some(num) = updates.telemetry_interval {
                                 // Update the interval using watch channel
+                                info!("Updated interval to {}!", num);
                                 interval_tx.send(num as u64).ok();
                             }
-    
+
                             let endpoint = format!("{}/c2d", base_url);
-                            let response = reqwest::Client::new()
+                            let response = match reqwest::Client::new()
                                 .post(&endpoint)
                                 .json(&json!(updates))
                                 .send()
-                                .await?;
+                                .await
+                            {
+                                Ok(res) => res,
+                                Err(err) => error!("Failed send message to device: {}", err),
+                            };
                             
                             let status = response.status();
-                            let text = response.text().await?;
                             if !status.is_success() {
-                                error!("C2D error: {}", text);
-                            } else {
-                                info!("C2D response: {}", text);
+                                match response.text().await {
+                                    Ok(text) => info!("Cloud to device error: {}", text),
+                                    Err(err) => error!("Parse error: {}", err)
+                                };
                             }
                         },
                         MessageType::DirectMethod(msg) => {
@@ -99,18 +168,22 @@ mod private {
                                 continue;
                             };
                             
-                            let response = reqwest::Client::new()
+                            let response = match reqwest::Client::new()
                                 .post(&endpoint)
                                 .body(msg.method_name.clone())
                                 .send()
-                                .await?;
+                                .await
+                            {
+                                Ok(res) => res,
+                                Err(err) => error!("Failed send message to device: {}", err),
+                            };;
 
                             let status = response.status();
-                            let text = response.text().await?;
                             if !status.is_success() {
-                                error!("Direct method error: {}", text);
-                            } else {
-                                info!("Direct method response: {}", text);
+                                match response.text().await {
+                                    Ok(text) => info!("Direct message error: {}", text),
+                                    Err(err) => error!("Parse error: {}", err)
+                                };
                             }
     
                             if let Err(err) = recv_client
@@ -132,22 +205,30 @@ mod private {
                             let updates: Updates = serde_json::from_slice(&msg.body)?;
                             if let Some(num) = updates.telemetry_interval {
                                 // Update interval
+                                info!("Updated interval to {}!", num);
                                 interval_tx.send(num as u64).ok();
                             }
     
                             let endpoint = format!("{}/desired-props", base_url);
-                            let response = reqwest::Client::new()
+                            let response = match reqwest::Client::new()
                                 .post(&endpoint)
                                 .json(&json!(updates))
                                 .send()
-                                .await?;
+                                .await
+                            {
+                                Ok(res) => res,
+                                Err(err) => {
+                                    error!("Failed to send desired properties: {}", err);
+                                    continue;
+                                }
+                            };
                             
                             let status = response.status();
-                            let text = response.text().await?;
                             if !status.is_success() {
-                                error!("Desired props error: {}", text);
-                            } else {
-                                info!("Desired props response: {}", text);
+                                match response.text().await {
+                                    Ok(text) => info!("Desired properties error: {}", text),
+                                    Err(err) => error!("Parse error: {}", err)
+                                };
                             }
                         },
                         MessageType::ErrorReceive(err) => {
@@ -160,21 +241,23 @@ mod private {
             #[allow(unreachable_code)]
             Ok::<(), Error>(())
         };
-    
+
         // -------------------------------
         // telemetry_sender_loop
         // -------------------------------
         let mut temp_client = client.clone();
         let telemetry_sender = async move {
             let mut count = 0u32;
-    
+
+            info!("Started telemetry loop.");
             loop {
                 // The current interval (in seconds)
                 let current_interval = *interval_rx.borrow();
     
                 // Trying to wait either for a timeout or for the channel to change
                 // If the interval wasn't changed, we'll send telemetry in current_interval seconds
-                match time::timeout(Duration::from_secs(current_interval), interval_rx.changed()).await {
+                info!("Waiting for timeout");
+                match time::timeout(time::Duration::from_secs(current_interval), interval_rx.changed()).await {
                     // 1) The channel changed before the timeout
                     Ok(Ok(())) => {
                         // That means a new value appeared in interval_rx
@@ -193,21 +276,36 @@ mod private {
                     Err(_timeout) => {
                         // Request telemetry data
                         let endpoint = format!("{}/telemetry", base_url);
-                        let response = reqwest::get(endpoint).await?;
+                        let response = match reqwest::get(endpoint).await {
+                            Ok(res) => res,
+                            Err(err) => {
+                                error!("Failed to get telemetry from device: {}", err);
+                                continue;
+                            }
+                        };
                         
                         if !response.status().is_success() {
-                            let text = response.text().await?;
-                            error!("Error requesting telemetry: {}", text);
+                            error!("Error requesting telemetry");
                         } else {
-                            let telemetry = response.json::<SensorData>().await?;
-                            info!("Send telemetry with id: {} to Azure portal", count);
+                            let sensor_data = match response.bytes().await {
+                                Ok(data) => data,
+                                Err(err) => {
+                                    error!("Parse error: {}", err);
+                                    continue;
+                                }
+                            }; 
     
                             let msg = Message::builder()
-                                .set_body(serde_json::to_vec(&telemetry).unwrap())
-                                .set_message_id(format!("{}-t", count))
+                                .set_body(sensor_data.to_vec())
+                                .set_content_type("application/json".to_string())
+                                .set_content_encoding("UTF-8".to_string())
+                                .set_message_id(format!("{}-t", count)) 
                                 .build();
     
-                            temp_client.send_message(msg).await?;
+                            match temp_client.send_message(msg).await {
+                                Ok(_) => info!("Sent telemetry with id: {} to Azure portal", count),
+                                Err(err) => error!("Failed to send message to Azure Portal. {}", err)
+                            };
                         }
     
                         count += 1;
@@ -220,16 +318,7 @@ mod private {
         };
     
         // Start both loops concurrently
-        let (receive_res, telemetry_res) = tokio::join!(receive_loop, telemetry_sender);
-    
-        if let Err(e) = receive_res {
-            error!("Receive loop failed: {:?}", e);
-        }
-        if let Err(e) = telemetry_res {
-            error!("Telemetry loop failed: {:?}", e);
-        }
-    
-        Ok(())
+        tokio::join!(receive_loop, telemetry_sender)
     }
 }
 
