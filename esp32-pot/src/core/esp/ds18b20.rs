@@ -3,26 +3,21 @@
 //!
 
 mod private {
-    use crate::core::SensorData;
-    use crate::core::Telemetry;
     use crate::core::esp::{OneWireType, Sensor};
     use crate::core::{Result, SmartPotError};
     use esp_idf_hal::gpio::{InputPin, OutputPin};
     use esp_idf_sys::EspError;
+    use smart_pot_core::*;
     use std::sync::Arc;
     use std::sync::Mutex;
 
     /// # Ds18B20Sensor
     ///
     /// Structure to interact with the DS18B20 temperature sensor using the OneWire protocol.
-    ///
-    /// ## Type Parameters:
-    /// - `T`: The type of the GPIO pin used for the OneWire bus, which must implement `InputPin` and `OutputPin`.
     pub struct Ds18B20Sensor<T>
     where
         T: InputPin + OutputPin,
     {
-        //  one_wire_bus: Rc<RefCell<OneWireType<T>>>,
         one_wire_bus: Arc<Mutex<OneWireType<T>>>,
         ds_address: ds18b20::Ds18b20,
     }
@@ -54,9 +49,8 @@ mod private {
             let mut ds_sensors: Vec<ds18b20::Ds18b20> = Vec::new();
 
             {
-                let mut wire_bus_locked = one_wire_bus
-                    .lock()
-                    .map_err(|_| SmartPotError::MutexError())?;
+                let mut wire_bus_locked =
+                    one_wire_bus.lock().map_err(|_| SmartPotError::MutexError)?;
 
                 while let Some((device_address, state)) = wire_bus_locked
                     .device_search(search_state.as_ref(), false, &mut delay)
@@ -115,7 +109,7 @@ mod private {
             let mut locked_wire_bus = self
                 .one_wire_bus
                 .lock()
-                .map_err(|_| SmartPotError::MutexError())?;
+                .map_err(|_| SmartPotError::MutexError)?;
 
             ds18b20::start_simultaneous_temp_measurement(&mut locked_wire_bus, &mut delay)
                 .map_err(|e| SmartPotError::OneWireError(e.into()))?;

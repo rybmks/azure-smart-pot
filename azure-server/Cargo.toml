@@ -4,7 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-azure_iot_sdk = { version = "0.8.0", features = ["with-provision", "c2d-messages", "direct-methods", "twin-properties", "error-handling-messages"], default-features = false }
+smart-pot-core = { path = "../smart-pot-core" }
+azure_iot_sdk = { version = "0.8.0", features = [
+    "with-provision",
+    "c2d-messages",
+    "direct-methods",
+    "twin-properties",
+    "error-handling-messages",
+], default-features = false }
 tokio = { version = "1.44.1", features = ["rt"] }
 mod_interface = "0.30.0"
 serde = { version = "1.0.219", features = ["derive"] }

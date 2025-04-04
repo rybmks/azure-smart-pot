@@ -1,5 +1,3 @@
-// main.rs
-
 use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::i2c::config::Config;
 use log::*;
@@ -33,7 +31,6 @@ fn main() {
     }
 }
 
-/// Main async logic
 async fn async_main() -> Result<()> {
     let peripherals = Peripherals::take()?;
     let wifi_modem = peripherals.modem;
@@ -75,7 +72,7 @@ async fn async_main() -> Result<()> {
 
             let mut board = match board.lock() {
                 Ok(b) => b,
-                Err(_) => return Err(SmartPotError::MutexError()),
+                Err(_) => return Err(SmartPotError::MutexError),
             };
             let telemetry = board.get_telemetry();
 
@@ -100,7 +97,7 @@ async fn async_main() -> Result<()> {
                     board.light_on()?;
                 } else {
                     error!("Board lock failed on /light/on");
-                    return Err(SmartPotError::MutexError());
+                    return Err(SmartPotError::MutexError);
                 }
                 info!("Light on.");
                 Ok::<(), SmartPotError>(())
@@ -118,7 +115,7 @@ async fn async_main() -> Result<()> {
                 if let Ok(mut board) = board.lock() {
                     board.light_off()?;
                 } else {
-                    return Err(SmartPotError::MutexError());
+                    return Err(SmartPotError::MutexError);
                 }
                 info!("Light off.");
                 Ok(())
@@ -133,7 +130,7 @@ async fn async_main() -> Result<()> {
             if let Ok(mut board) = board.lock() {
                 board.set_is_fahrenheit(true);
             } else {
-                return Err(SmartPotError::MutexError());
+                return Err(SmartPotError::MutexError);
             }
             info!("Temperature metrics set to fahrenheit");
 
@@ -148,7 +145,7 @@ async fn async_main() -> Result<()> {
             if let Ok(mut board) = board.lock() {
                 board.set_is_fahrenheit(false);
             } else {
-                return Err(SmartPotError::MutexError());
+                return Err(SmartPotError::MutexError);
             }
             info!("Temperature metrics set to сelsius");
             Ok::<(), SmartPotError>(())

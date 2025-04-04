@@ -4,7 +4,7 @@
 
 mod private {
     use crate::core::esp::{Bh1750, DhtConfig, DhtSensor, Ds18B20Sensor, Sensor, wifi};
-    use crate::core::{Result, SmartPotError, Telemetry};
+    use crate::core::{Result, SmartPotError};
     use esp_idf_hal::delay::FreeRtos;
     use esp_idf_hal::gpio::Output;
     use esp_idf_hal::gpio::{AnyIOPin, OutputPin, PinDriver};
@@ -17,6 +17,7 @@ mod private {
         timer::EspTaskTimerService,
         wifi::{AsyncWifi, EspWifi},
     };
+    use smart_pot_core::*;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -27,22 +28,17 @@ mod private {
     /// The board is capable of managing environmental sensors (e.g., DHT, BH1750, DS18B20)
     /// and controlling output pins such as light.
     ///
-    /// ## Fields:
-    /// - `wifi`:  
-    ///   An instance of `AsyncWifi` that manages Wi-Fi connectivity.
-    /// - `sensors`:  
-    ///   A vector of boxed sensor objects implementing the `Sensor` trait.
-    /// - `light_pin`:  
-    ///   An output pin used to enable or disable the pot's light.
-    ///
     /// ## Usage
     /// A `Board` instance is created using the [`BoardBuilder`] pattern.
     pub struct Board<T>
     where
         T: OutputPin,
     {
+        ///   An instance of `AsyncWifi` that manages Wi-Fi connectivity.
         pub wifi: AsyncWifi<EspWifi<'static>>,
+        ///   A vector of boxed sensor objects implementing the `Sensor` trait.
         pub sensors: Vec<Box<dyn Sensor<'static> + Send>>,
+        ///   An output pin used to enable or disable the pot's light.
         pub light_pin: PinDriver<'static, T, Output>,
         pub is_fahrenheit: bool,
     }
@@ -51,16 +47,12 @@ mod private {
     ///
     /// A builder for constructing a `Board` with custom sensor configurations.
     /// Allows step-by-step registration of various sensor types before building the full board.
-
     #[derive(Default)]
     pub struct BoardBuilder {
         sensors: Vec<Box<dyn Sensor<'static> + Send>>,
     }
     impl BoardBuilder {
         /// Creates a new empty builder instance.
-        ///
-        /// # Returns
-        /// A new `BoardBuilder` with no sensors registered yet.
         pub fn new() -> Self {
             BoardBuilder { sensors: vec![] }
         }
@@ -70,9 +62,6 @@ mod private {
         /// # Parameters
         /// - `bh1750_i2c`: The I2C driver used for communication.
         /// - `resolutin`: The measurement resolution of the BH1750 sensor.
-        ///
-        /// # Returns
-        /// The updated builder instance.
         pub fn add_bh1750_sensor(
             mut self,
             bh1750_i2c: I2cDriver<'static>,
@@ -87,9 +76,6 @@ mod private {
         ///
         /// # Parameters
         /// - `dht_configs`: A vector of `DhtConfig` instances specifying pins and sensor types.
-        ///
-        /// # Returns
-        /// The updated builder instance or error.
         pub fn add_dht_sensors(mut self, dht_configs: Vec<DhtConfig>) -> Result<Self> {
             for dht in dht_configs {
                 let dht_driver = PinDriver::input_output_od(dht.pin)?;
@@ -104,9 +90,6 @@ mod private {
         ///
         /// # Parameters
         /// - `ds18b20_pins`: A list of GPIO pins to which DS18B20 sensors are connected.
-        ///
-        /// # Returns
-        /// The updated builder instance or error.
         pub fn add_ds18b20_sensors(mut self, ds18b20_pins: Vec<AnyIOPin>) -> Result<Self> {
             for ds in ds18b20_pins {
                 let ds_driver = PinDriver::input_output_od(ds)?;
@@ -131,9 +114,6 @@ mod private {
         /// - `wifi_modem`: Wi-Fi modem instance.
         /// - `wifi_ssid`: Wi-Fi network SSID.
         /// - `wifi_password`: Wi-Fi password.
-        ///
-        /// # Returns
-        /// A fully configured and connected `Board`.
         pub async fn build<T: OutputPin>(
             self,
             light_pin: T,
@@ -170,17 +150,11 @@ mod private {
     }
     impl<T: OutputPin> Board<T> {
         /// Turns on the light (sets the light control pin high).
-        ///
-        /// # Returns
-        /// `Ok(())` if successful, or an error if pin control fails.
         pub fn light_on(&mut self) -> Result<()> {
             self.light_pin.set_high().map_err(SmartPotError::EspError)
         }
 
         /// Turns off the light (sets the light control pin low).
-        ///
-        /// # Returns
-        /// `Ok(())` if successful, or an error if pin control fails.
         pub fn light_off(&mut self) -> Result<()> {
             self.light_pin.set_low().map_err(SmartPotError::EspError)
         }
@@ -205,7 +179,7 @@ mod private {
         /// A vector of successfully collected `SensorData`.
         ///
         /// Any sensor that fails after retries will be logged and skipped.
-        pub fn get_telemetry(&mut self) -> Vec<crate::core::SensorData> {
+        pub fn get_telemetry(&mut self) -> Vec<SensorData> {
             self.sensors
                 .iter_mut()
                 .filter_map(|sensor| {

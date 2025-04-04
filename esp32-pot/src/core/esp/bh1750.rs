@@ -4,10 +4,11 @@
 
 mod private {
     use crate::core::esp::Sensor;
-    use crate::core::{Result, SensorData, SmartPotError, Telemetry};
+    use crate::core::{Result, SmartPotError};
     use bh1750::*;
     use esp_idf_hal::delay::Delay;
     use esp_idf_hal::i2c::I2cDriver;
+    use smart_pot_core::*;
 
     /// # Bh1750
     ///

@@ -3,9 +3,10 @@
 //!
 
 mod private {
-    use crate::core::esp::private::TemperatureWithHumidity;
+    use smart_pot_core::*;
+
     use crate::core::esp::{DhtType, Sensor};
-    use crate::core::{Result, SensorData, SmartPotError, Telemetry};
+    use crate::core::{Result, SmartPotError};
     use dht_sensor::*;
     use esp_idf_hal::gpio::{InputOutput, InputPin, OutputPin, PinDriver};
 
@@ -15,9 +16,6 @@ mod private {
     ///
     /// This struct represents a DHT sensor (either DHT11 or DHT22). It allows you to read temperature and humidity data
     /// from the sensor using the GPIO pins.
-    ///
-    /// ## Type Parameters:
-    /// - `T`: The type of GPIO pin used for communication with the DHT sensor, which must implement both `InputPin` and `OutputPin`.
     pub struct DhtSensor<T>
     where
         T: InputPin + OutputPin,
@@ -35,9 +33,6 @@ mod private {
         /// # Parameters:
         /// - `pin`: The pin driver `PinDriver<'static, T, InputOutput>` used to communicate with the DHT sensor.
         /// - `dht_type`: The type of DHT sensor being used (`Dht11` or `Dht22`).
-        ///
-        /// # Returns:
-        /// A new instance of the `DhtSensor` struct.
         pub fn new(pin: Driver<T>, dht_type: DhtType) -> Self {
             DhtSensor {
                 pin_driver: pin,
