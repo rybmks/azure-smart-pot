@@ -13,22 +13,21 @@
 
 mod private {
     use thiserror::Error;
-    
+
     /// Custom error type for the application.
     #[derive(Error, Debug)]
     pub enum Error {
-
         /// Represents errors that occur when accessing environment variables.
-        #[error("{0}")]
+        #[error(transparent)]
         EnvError(#[from] std::env::VarError),
 
         /// Represents errors related to IoT Hub operations.
-        #[error("{0}")]
-        HubError(String),
+        #[error(transparent)]
+        HubError(Box<dyn std::error::Error>),
 
         /// Represents error related to int parse error.
-        #[error("{0}")]
-        ParseError(#[from] std::num::ParseIntError)
+        #[error(transparent)]
+        ParseError(#[from] std::num::ParseIntError),
     }
 }
 

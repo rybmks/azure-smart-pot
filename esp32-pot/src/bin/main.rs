@@ -1,21 +1,18 @@
-// main.rs
-
 use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::i2c::config::Config;
 use log::*;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use esp32_pot::core::Result;
 use esp32_pot::core::esp::board::BoardBuilder;
-use esp32_pot::core::esp::{DhtConfig, DhtType};
-use esp32_pot::core::{Result, SmartPotError};
+use esp32_pot::core::esp::{DhtConfig, DhtType, server::server_init};
 
 use esp_idf_svc::hal::task;
 use esp_idf_svc::log::EspLogger;
 
 use esp_idf_hal::gpio::IOPin;
 use esp_idf_hal::prelude::Peripherals;
-use esp_idf_svc::http::server::EspHttpServer;
 
 // Environment vars or constants
 const SSID: &str = env!("WIFI_SSID");
@@ -33,7 +30,6 @@ fn main() {
     }
 }
 
-/// Main async logic
 async fn async_main() -> Result<()> {
     let peripherals = Peripherals::take()?;
     let wifi_modem = peripherals.modem;
@@ -59,102 +55,8 @@ async fn async_main() -> Result<()> {
         .await?;
 
     let board = Arc::new(Mutex::new(board));
-    let mut server = EspHttpServer::new(&Default::default())?;
 
-    // GET / — telemetry JSON
-    {
-        let board = Arc::clone(&board);
-        server.fn_handler("/telemetry", embedded_svc::http::Method::Get, move |req| {
-            let mut res = match req.into_ok_response() {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("Response error: {:?}", e);
-                    return Err(SmartPotError::EspIoError(e));
-                }
-            };
-
-            let mut board = match board.lock() {
-                Ok(b) => b,
-                Err(_) => return Err(SmartPotError::MutexError()),
-            };
-            let telemetry = board.get_telemetry();
-
-            match serde_json::to_string(&telemetry) {
-                Ok(telemetry) => {
-                    res.write(telemetry.as_bytes())?;
-                    Ok(())
-                }
-                Err(err) => Err(SmartPotError::SerializationError(err)),
-            }
-        })?;
-    }
-
-    // POST /light/on
-    {
-        let board = Arc::clone(&board);
-        server.fn_handler(
-            "/direct-method/light-on",
-            embedded_svc::http::Method::Post,
-            move |_| {
-                if let Ok(mut board) = board.lock() {
-                    board.light_on()?;
-                } else {
-                    error!("Board lock failed on /light/on");
-                    return Err(SmartPotError::MutexError());
-                }
-                info!("Light on.");
-                Ok::<(), SmartPotError>(())
-            },
-        )?;
-    }
-
-    // POST /light/off
-    {
-        let board = Arc::clone(&board);
-        server.fn_handler(
-            "/direct-method/light-off",
-            embedded_svc::http::Method::Post,
-            move |_| {
-                if let Ok(mut board) = board.lock() {
-                    board.light_off()?;
-                } else {
-                    return Err(SmartPotError::MutexError());
-                }
-                info!("Light off.");
-                Ok(())
-            },
-        )?;
-    }
-
-    // POST /c2d/far
-    {
-        let board = Arc::clone(&board);
-        server.fn_handler("/c2d/far", embedded_svc::http::Method::Post, move |_| {
-            if let Ok(mut board) = board.lock() {
-                board.set_is_fahrenheit(true);
-            } else {
-                return Err(SmartPotError::MutexError());
-            }
-            info!("Temperature metrics set to fahrenheit");
-
-            Ok::<(), SmartPotError>(())
-        })?;
-    }
-
-    // POST /c2d/cel
-    {
-        let board = Arc::clone(&board);
-        server.fn_handler("/c2d/cel", embedded_svc::http::Method::Post, move |_| {
-            if let Ok(mut board) = board.lock() {
-                board.set_is_fahrenheit(false);
-            } else {
-                return Err(SmartPotError::MutexError());
-            }
-            info!("Temperature metrics set to сelsius");
-            Ok::<(), SmartPotError>(())
-        })?;
-    }
-
+    let server = server_init(board);
     // Prevent server from dropping
     core::mem::forget(server);
 

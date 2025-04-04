@@ -4,8 +4,7 @@
 
 mod private {
     use crate::core::esp::{Bh1750, DhtConfig, DhtSensor, Ds18B20Sensor, Sensor, wifi};
-    use crate::core::{Result, SmartPotError, Telemetry};
-    use esp_idf_hal::delay::FreeRtos;
+    use crate::core::{Result, SmartPotError};
     use esp_idf_hal::gpio::Output;
     use esp_idf_hal::gpio::{AnyIOPin, OutputPin, PinDriver};
     use esp_idf_hal::i2c::I2cDriver;
@@ -17,9 +16,12 @@ mod private {
         timer::EspTaskTimerService,
         wifi::{AsyncWifi, EspWifi},
     };
+    use smart_pot_core::*;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
+
+    const MAX_SENSOR_MEASUREMENT_RETRIES: u8 = 3;
 
     /// # Board
     ///
@@ -27,40 +29,31 @@ mod private {
     /// The board is capable of managing environmental sensors (e.g., DHT, BH1750, DS18B20)
     /// and controlling output pins such as light.
     ///
-    /// ## Fields:
-    /// - `wifi`:  
-    ///   An instance of `AsyncWifi` that manages Wi-Fi connectivity.
-    /// - `sensors`:  
-    ///   A vector of boxed sensor objects implementing the `Sensor` trait.
-    /// - `light_pin`:  
-    ///   An output pin used to enable or disable the pot's light.
-    ///
     /// ## Usage
     /// A `Board` instance is created using the [`BoardBuilder`] pattern.
     pub struct Board<T>
     where
         T: OutputPin,
     {
+        ///   An instance of `AsyncWifi` that manages Wi-Fi connectivity.
         pub wifi: AsyncWifi<EspWifi<'static>>,
+        ///   A vector of boxed sensor objects implementing the `Sensor` trait.
         pub sensors: Vec<Box<dyn Sensor<'static> + Send>>,
+        ///   An output pin used to enable or disable the pot's light.
         pub light_pin: PinDriver<'static, T, Output>,
-        pub is_fahrenheit: bool,
+        pub temperature_units: TemperatureUnits,
     }
 
     /// # BoardBuilder
     ///
     /// A builder for constructing a `Board` with custom sensor configurations.
     /// Allows step-by-step registration of various sensor types before building the full board.
-
     #[derive(Default)]
     pub struct BoardBuilder {
         sensors: Vec<Box<dyn Sensor<'static> + Send>>,
     }
     impl BoardBuilder {
         /// Creates a new empty builder instance.
-        ///
-        /// # Returns
-        /// A new `BoardBuilder` with no sensors registered yet.
         pub fn new() -> Self {
             BoardBuilder { sensors: vec![] }
         }
@@ -70,15 +63,12 @@ mod private {
         /// # Parameters
         /// - `bh1750_i2c`: The I2C driver used for communication.
         /// - `resolutin`: The measurement resolution of the BH1750 sensor.
-        ///
-        /// # Returns
-        /// The updated builder instance.
         pub fn add_bh1750_sensor(
             mut self,
             bh1750_i2c: I2cDriver<'static>,
-            resolutin: bh1750::Resolution,
+            resolution: bh1750::Resolution,
         ) -> Self {
-            let bh = Box::new(Bh1750::new(bh1750_i2c, resolutin));
+            let bh = Box::new(Bh1750::new(bh1750_i2c, resolution));
             self.sensors.push(bh);
             self
         }
@@ -87,9 +77,6 @@ mod private {
         ///
         /// # Parameters
         /// - `dht_configs`: A vector of `DhtConfig` instances specifying pins and sensor types.
-        ///
-        /// # Returns
-        /// The updated builder instance or error.
         pub fn add_dht_sensors(mut self, dht_configs: Vec<DhtConfig>) -> Result<Self> {
             for dht in dht_configs {
                 let dht_driver = PinDriver::input_output_od(dht.pin)?;
@@ -104,9 +91,6 @@ mod private {
         ///
         /// # Parameters
         /// - `ds18b20_pins`: A list of GPIO pins to which DS18B20 sensors are connected.
-        ///
-        /// # Returns
-        /// The updated builder instance or error.
         pub fn add_ds18b20_sensors(mut self, ds18b20_pins: Vec<AnyIOPin>) -> Result<Self> {
             for ds in ds18b20_pins {
                 let ds_driver = PinDriver::input_output_od(ds)?;
@@ -131,9 +115,6 @@ mod private {
         /// - `wifi_modem`: Wi-Fi modem instance.
         /// - `wifi_ssid`: Wi-Fi network SSID.
         /// - `wifi_password`: Wi-Fi password.
-        ///
-        /// # Returns
-        /// A fully configured and connected `Board`.
         pub async fn build<T: OutputPin>(
             self,
             light_pin: T,
@@ -164,23 +145,17 @@ mod private {
                 wifi,
                 sensors: self.sensors,
                 light_pin: light_driver,
-                is_fahrenheit: false,
+                temperature_units: TemperatureUnits::Celsius,
             })
         }
     }
     impl<T: OutputPin> Board<T> {
         /// Turns on the light (sets the light control pin high).
-        ///
-        /// # Returns
-        /// `Ok(())` if successful, or an error if pin control fails.
         pub fn light_on(&mut self) -> Result<()> {
             self.light_pin.set_high().map_err(SmartPotError::EspError)
         }
 
         /// Turns off the light (sets the light control pin low).
-        ///
-        /// # Returns
-        /// `Ok(())` if successful, or an error if pin control fails.
         pub fn light_off(&mut self) -> Result<()> {
             self.light_pin.set_low().map_err(SmartPotError::EspError)
         }
@@ -195,8 +170,8 @@ mod private {
         /// - `is_fahrenheit`: A boolean value. If `true`, the temperature will be displayed in Fahrenheit;
         ///   if `false`, it will be in Celsius.
         ///
-        pub fn set_is_fahrenheit(&mut self, is_fahrenheit: bool) {
-            self.is_fahrenheit = is_fahrenheit;
+        pub fn set_temperature_units(&mut self, units: TemperatureUnits) {
+            self.temperature_units = units;
         }
 
         /// Retrieves telemetry data from all connected sensors with 3 retry attempts.
@@ -205,44 +180,14 @@ mod private {
         /// A vector of successfully collected `SensorData`.
         ///
         /// Any sensor that fails after retries will be logged and skipped.
-        pub fn get_telemetry(&mut self) -> Vec<crate::core::SensorData> {
+        pub fn get_telemetry(&mut self) -> Vec<SensorData> {
             self.sensors
                 .iter_mut()
                 .filter_map(|sensor| {
-                    for i in 1..=3 {
-                        match sensor.read_data() {
-                            Ok(mut data) => {
-                                if self.is_fahrenheit {
-                                    match data.telemetry {
-                                        Telemetry::LightValue(_) => {}
-                                        Telemetry::Temperature(ref mut temperature_data) => {
-                                            *temperature_data =
-                                                (*temperature_data * 9.0 / 5.0) + 32.0;
-                                        }
-                                        Telemetry::TemperatureWithHumidity(
-                                            ref mut temperature_with_humidity_data,
-                                        ) => {
-                                            temperature_with_humidity_data.temperature =
-                                                (temperature_with_humidity_data.temperature * 9.0
-                                                    / 5.0)
-                                                    + 32.0;
-                                        }
-                                    }
-                                }
-
-                                log::info!("Sensor #{} => {:?}", sensor.get_name(), data);
-                                return Some(data);
-                            }
-                            Err(e) => log::warn!(
-                                "Retry #{i}: Sensor #{} read error: {:?}",
-                                sensor.get_name(),
-                                e
-                            ),
-                        }
-                        FreeRtos::delay_ms(50);
-                    }
-                    log::error!("Sensor #{} failed to read after retries", sensor.get_name());
-                    None
+                    sensor.read_sensor_with_retries(
+                        MAX_SENSOR_MEASUREMENT_RETRIES,
+                        &self.temperature_units,
+                    )
                 })
                 .collect()
         }

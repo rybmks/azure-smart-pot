@@ -13,5 +13,5 @@ build-std = ["std", "panic_abort"]
 MCU = "esp32"
 # Note: this variable is not used by the pio builder (`cargo build --features pio`)
 ESP_IDF_VERSION = "v5.2.3"
-WIFI_SSID = "kievskaya_hunta"
-WIFI_PASS = "fourtyeighteen"
+WIFI_SSID = "wifi_ssid"
+WIFI_PASS = "wifi_password"

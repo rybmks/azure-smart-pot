@@ -35,8 +35,9 @@ mod private {
         #[error("Dht error:\n{0}")]
         DhtError(#[from] DhtErrorWrapper),
 
-        #[error("Board lock failed on /light/on")]
-        MutexError(),
+        #[error("Board lock failed")]
+        MutexError,
+        
         #[error("Some error: {0}")]
         SomeError(#[from] Box<dyn std::error::Error>),
     }
