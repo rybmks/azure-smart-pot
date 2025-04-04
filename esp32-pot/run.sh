@@ -5,5 +5,5 @@ docker run -it --rm \
   --network smart-pot \
   --device=/dev/ttyUSB0 \
   --group-add "$(stat -c "%g" /dev/ttyUSB0)" \
-  esp32-pot \
+  --name esp32-pot \
   bash -c "cargo run"
