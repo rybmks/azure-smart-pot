@@ -40,7 +40,7 @@ mod private {
 
         IoTHubClient::new(&hostname, device_id, token_source)
             .await
-            .map_err(|err| Error::HubError(err.to_string()))
+            .map_err(|err| Error::HubError(err))
     }
 
     /// ## get_hub_with_dps
@@ -62,10 +62,12 @@ mod private {
         let scope_id = std::env::var("SCOPE_ID")?;
         let device_id = std::env::var("DEVICE_ID")?;
         let device_key = std::env::var("DEVICE_KEY")?;
+        let max_retries_str = std::env::var("MAX_RETRIES")?;
+        let max_retries = max_retries_str.parse()?;
 
-        IoTHubClient::from_provision_service(&scope_id, device_id, &device_key, 4)
+        IoTHubClient::from_provision_service(&scope_id, device_id, &device_key, max_retries)
             .await
-            .map_err(|err| Error::HubError(err.to_string()))
+            .map_err(|err| Error::HubError(err))
     }
 
     /// ## run
@@ -89,8 +91,8 @@ mod private {
     /// ## Returns
     /// Returns `(Result<()>, Result<()>)` results of loops.
     pub async fn run(base_url: &str) -> (Result<()>, Result<()>) {
-        let initial_interval = 5_u64;
-        let (interval_tx, mut interval_rx) = watch::channel::<u64>(initial_interval);
+        const INITIAL_INTERVAL: u64 = 5;
+        let (interval_tx, mut interval_rx) = watch::channel::<u64>(INITIAL_INTERVAL);
 
         let mut client = match get_hub_with_dps().await {
             Ok(client) => client,
@@ -108,6 +110,8 @@ mod private {
         // - recv_client
         // - interval_tx (interval updating)
         let receive_loop = async move {
+            let esp_client = reqwest::Client::new();
+
             info!("Started receive loop.");
 
             loop {
@@ -137,7 +141,10 @@ mod private {
                                 None => continue,
                             };
 
-                            let response = match reqwest::Client::new().put(&endpoint).send().await
+                            let response = match esp_client
+                                .put(&endpoint)
+                                .send()
+                                .await
                             {
                                 Ok(res) => res,
                                 Err(err) => {
@@ -166,8 +173,8 @@ mod private {
                                 continue;
                             };
 
-                            let response = match reqwest::Client::new()
-                                .post(&endpoint)
+                            let response = match esp_client
+                                .put(&endpoint)
                                 .body(msg.method_name.clone())
                                 .send()
                                 .await
@@ -187,10 +194,11 @@ mod private {
                                 };
                             }
 
+                            const RESPOND_RESPOND_TO_DIRECT_METHOD_STATUS: i32 = 0;
                             if let Err(err) = recv_client
                                 .respond_to_direct_method(DirectMethodResponse::new(
                                     msg.request_id,
-                                    0,
+                                    RESPOND_RESPOND_TO_DIRECT_METHOD_STATUS,
                                     Some(
                                         std::str::from_utf8(&msg.message.body)
                                             .unwrap_or_default()
