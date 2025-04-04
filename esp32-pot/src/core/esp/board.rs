@@ -5,7 +5,6 @@
 mod private {
     use crate::core::esp::{Bh1750, DhtConfig, DhtSensor, Ds18B20Sensor, Sensor, wifi};
     use crate::core::{Result, SmartPotError};
-    use esp_idf_hal::delay::FreeRtos;
     use esp_idf_hal::gpio::Output;
     use esp_idf_hal::gpio::{AnyIOPin, OutputPin, PinDriver};
     use esp_idf_hal::i2c::I2cDriver;
@@ -21,6 +20,8 @@ mod private {
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
+
+    const MAX_SENSOR_MEASUREMENT_RETRIES: u8 = 3;
 
     /// # Board
     ///
@@ -65,9 +66,9 @@ mod private {
         pub fn add_bh1750_sensor(
             mut self,
             bh1750_i2c: I2cDriver<'static>,
-            resolutin: bh1750::Resolution,
+            resolution: bh1750::Resolution,
         ) -> Self {
-            let bh = Box::new(Bh1750::new(bh1750_i2c, resolutin));
+            let bh = Box::new(Bh1750::new(bh1750_i2c, resolution));
             self.sensors.push(bh);
             self
         }
@@ -182,35 +183,14 @@ mod private {
         pub fn get_telemetry(&mut self) -> Vec<SensorData> {
             self.sensors
                 .iter_mut()
-                .filter_map(|data| read_sensor_with_retries(&self.temperature_units, data))
+                .filter_map(|sensor| {
+                    sensor.read_sensor_with_retries(
+                        MAX_SENSOR_MEASUREMENT_RETRIES,
+                        &self.temperature_units,
+                    )
+                })
                 .collect()
         }
-    }
-
-    fn read_sensor_with_retries(
-        units: &TemperatureUnits,
-        sensor: &mut Box<dyn Sensor<'_> + Send>,
-    ) -> Option<SensorData> {
-        for i in 1..=3 {
-            match sensor.read_data() {
-                Ok(mut data) => match data.telemetry {
-                    Telemetry::LightIntensityLux(_) => {}
-                    Telemetry::TemperatureWithHumidity(ref mut data) => {
-                        data.temperature.to_units(units)
-                    }
-                    Telemetry::Temperature(ref mut data) => data.to_units(units),
-                },
-
-                Err(e) => log::warn!(
-                    "Retry #{i}: Sensor #{} read error: {:?}",
-                    sensor.get_name(),
-                    e
-                ),
-            }
-            FreeRtos::delay_ms(50);
-        }
-        log::error!("Sensor #{} failed to read after retries", sensor.get_name());
-        None
     }
 }
 

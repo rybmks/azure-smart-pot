@@ -4,7 +4,10 @@
 
 mod private {
     use crate::core::Result;
-    use esp_idf_hal::gpio::{AnyIOPin, InputOutput, PinDriver};
+    use esp_idf_hal::{
+        delay::FreeRtos,
+        gpio::{AnyIOPin, InputOutput, PinDriver},
+    };
     use one_wire_bus::OneWire;
     use smart_pot_core::*;
 
@@ -53,6 +56,44 @@ mod private {
 
         ///   Reads data from the sensor and returns it as a `SensorData` struct.
         fn read_data(&mut self) -> Result<SensorData>;
+
+        fn read_sensor_with_retries(
+            &mut self,
+            retries: u8,
+            units: &TemperatureUnits,
+        ) -> Option<SensorData> {
+            for i in 1..=retries {
+                match self.read_data() {
+                    Ok(mut data) => match data.telemetry {
+                        Telemetry::LightIntensityLux(_) => {
+                            log::info!("Sensor #{} => {:?}", self.get_name(), data);
+                            return Some(data);
+                        }
+                        Telemetry::TemperatureWithHumidity(ref mut temp) => {
+                            temp.temperature.to_units(units);
+                            log::info!("Sensor #{} => {:?}", self.get_name(), data);
+                            return Some(data);
+                        }
+                        Telemetry::Temperature(ref mut temp) => {
+                            temp.to_units(units);
+                            log::info!("Sensor #{} => {:?}", self.get_name(), data);
+                            return Some(data);
+                        }
+                    },
+
+                    Err(e) => {
+                        log::warn!(
+                            "Retry #{i}: Sensor #{} read error: {:?}",
+                            self.get_name(),
+                            e
+                        );
+                        FreeRtos::delay_ms(50);
+                    }
+                }
+            }
+            log::error!("Sensor #{} failed to read after retries", self.get_name());
+            None
+        }
     }
 }
 
@@ -63,7 +104,7 @@ crate::mod_interface! {
     layer bh1750;
     layer board;
     layer server;
-    
+
     own use {
         Sensor,
         OneWireType,
