@@ -68,7 +68,7 @@ mod private {
                     Ok(data) => Ok(SensorData {
                         timestamp: chrono::Utc::now(),
                         telemetry: Telemetry::TemperatureWithHumidity(TemperatureWithHumidity {
-                            temperature: data.temperature as f32,
+                            temperature: Temperature::CelsiusTemperature(data.temperature as f32),
                             humidity: data.relative_humidity as f32,
                         }),
                     }),
@@ -79,7 +79,7 @@ mod private {
                     Ok(data) => Ok(SensorData {
                         timestamp: chrono::Utc::now(),
                         telemetry: Telemetry::TemperatureWithHumidity(TemperatureWithHumidity {
-                            temperature: data.temperature,
+                            temperature: Temperature::CelsiusTemperature(data.temperature),
                             humidity: data.relative_humidity,
                         }),
                     }),

@@ -40,7 +40,7 @@ mod private {
         pub sensors: Vec<Box<dyn Sensor<'static> + Send>>,
         ///   An output pin used to enable or disable the pot's light.
         pub light_pin: PinDriver<'static, T, Output>,
-        pub is_fahrenheit: bool,
+        pub temperature_units: TemperatureUnits,
     }
 
     /// # BoardBuilder
@@ -144,7 +144,7 @@ mod private {
                 wifi,
                 sensors: self.sensors,
                 light_pin: light_driver,
-                is_fahrenheit: false,
+                temperature_units: TemperatureUnits::Celsius,
             })
         }
     }
@@ -169,8 +169,8 @@ mod private {
         /// - `is_fahrenheit`: A boolean value. If `true`, the temperature will be displayed in Fahrenheit;
         ///   if `false`, it will be in Celsius.
         ///
-        pub fn set_is_fahrenheit(&mut self, is_fahrenheit: bool) {
-            self.is_fahrenheit = is_fahrenheit;
+        pub fn set_temperature_units(&mut self, units: TemperatureUnits) {
+            self.temperature_units = units;
         }
 
         /// Retrieves telemetry data from all connected sensors with 3 retry attempts.
@@ -182,44 +182,35 @@ mod private {
         pub fn get_telemetry(&mut self) -> Vec<SensorData> {
             self.sensors
                 .iter_mut()
-                .filter_map(|sensor| {
-                    for i in 1..=3 {
-                        match sensor.read_data() {
-                            Ok(mut data) => {
-                                if self.is_fahrenheit {
-                                    match data.telemetry {
-                                        Telemetry::LightValue(_) => {}
-                                        Telemetry::Temperature(ref mut temperature_data) => {
-                                            *temperature_data =
-                                                (*temperature_data * 9.0 / 5.0) + 32.0;
-                                        }
-                                        Telemetry::TemperatureWithHumidity(
-                                            ref mut temperature_with_humidity_data,
-                                        ) => {
-                                            temperature_with_humidity_data.temperature =
-                                                (temperature_with_humidity_data.temperature * 9.0
-                                                    / 5.0)
-                                                    + 32.0;
-                                        }
-                                    }
-                                }
-
-                                log::info!("Sensor #{} => {:?}", sensor.get_name(), data);
-                                return Some(data);
-                            }
-                            Err(e) => log::warn!(
-                                "Retry #{i}: Sensor #{} read error: {:?}",
-                                sensor.get_name(),
-                                e
-                            ),
-                        }
-                        FreeRtos::delay_ms(50);
-                    }
-                    log::error!("Sensor #{} failed to read after retries", sensor.get_name());
-                    None
-                })
+                .filter_map(|data| read_sensor_with_retries(&self.temperature_units, data))
                 .collect()
         }
+    }
+
+    fn read_sensor_with_retries(
+        units: &TemperatureUnits,
+        sensor: &mut Box<dyn Sensor<'_> + Send>,
+    ) -> Option<SensorData> {
+        for i in 1..=3 {
+            match sensor.read_data() {
+                Ok(mut data) => match data.telemetry {
+                    Telemetry::LightIntensityLux(_) => {}
+                    Telemetry::TemperatureWithHumidity(ref mut data) => {
+                        data.temperature.to_units(units)
+                    }
+                    Telemetry::Temperature(ref mut data) => data.to_units(units),
+                },
+
+                Err(e) => log::warn!(
+                    "Retry #{i}: Sensor #{} read error: {:?}",
+                    sensor.get_name(),
+                    e
+                ),
+            }
+            FreeRtos::delay_ms(50);
+        }
+        log::error!("Sensor #{} failed to read after retries", sensor.get_name());
+        None
     }
 }
 

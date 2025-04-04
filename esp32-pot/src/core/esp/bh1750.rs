@@ -62,7 +62,7 @@ mod private {
 
             Ok(SensorData {
                 timestamp: chrono::Utc::now(),
-                telemetry: Telemetry::LightValue(data),
+                telemetry: Telemetry::LightIntensityLux(data),
             })
         }
     }

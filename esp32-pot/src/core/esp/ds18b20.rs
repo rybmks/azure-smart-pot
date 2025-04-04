@@ -123,7 +123,9 @@ mod private {
 
             Ok(SensorData {
                 timestamp: chrono::Utc::now(),
-                telemetry: Telemetry::Temperature(sensor_data.temperature),
+                telemetry: Telemetry::Temperature(Temperature::CelsiusTemperature(
+                    sensor_data.temperature,
+                )),
             })
         }
     }

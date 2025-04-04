@@ -13,12 +13,37 @@ pub struct Updates {
     pub telemetry_interval: Option<u32>,
 }
 
+pub enum TemperatureUnits {
+    Celsius,
+    Fahrenheit,
+}
+
+/// Struct representing temperature (Celsius or Fahrenheit)
+#[derive(Debug, Serialize, PartialEq)]
+pub enum Temperature {
+    CelsiusTemperature(f32),
+    FahrenheitTemperature(f32),
+}
+impl Temperature {
+    pub fn to_units(&mut self, unit: &TemperatureUnits) {
+        match (&self, unit) {
+            (Temperature::CelsiusTemperature(value), TemperatureUnits::Fahrenheit) => {
+                *self = Temperature::FahrenheitTemperature(*value * 9.0 / 5.0 + 32.0)
+            }
+            (Temperature::FahrenheitTemperature(value), TemperatureUnits::Celsius) => {
+                *self = Temperature::CelsiusTemperature((*value - 32.0) * 5.0 / 9.0)
+            }
+            _ => return,
+        };
+    }
+}
+
 /// # TemperatureWithHumidity
 ///
 /// Struct representing temperature and humidity readings from a DHT sensor.
 #[derive(Debug, Serialize)]
 pub struct TemperatureWithHumidity {
-    pub temperature: f32,
+    pub temperature: Temperature,
     pub humidity: f32,
 }
 
@@ -28,11 +53,11 @@ pub struct TemperatureWithHumidity {
 #[derive(Debug, Serialize)]
 pub enum Telemetry {
     ///   Represents a temperature reading (in Celsius).
-    Temperature(f32),
+    Temperature(Temperature),
     ///   Represents both temperature and humidity readings.
     TemperatureWithHumidity(TemperatureWithHumidity),
     ///   Represents a light intensity reading (in lux).
-    LightValue(f32),
+    LightIntensityLux(f32),
 }
 
 /// # SensorData
@@ -46,4 +71,42 @@ pub struct SensorData {
     pub timestamp: DateTime<Utc>,
     ///   The telemetry data associated with the sensor reading (temperature, humidity, or light value).
     pub telemetry: Telemetry,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_celsius_to_fahrenheit() {
+        let mut temp = Temperature::CelsiusTemperature(0.0);
+        temp.to_units(&TemperatureUnits::Fahrenheit);
+        assert_eq!(temp, Temperature::FahrenheitTemperature(32.0));
+
+        let mut temp = Temperature::CelsiusTemperature(100.0);
+        temp.to_units(&TemperatureUnits::Fahrenheit);
+        assert_eq!(temp, Temperature::FahrenheitTemperature(212.0));
+    }
+
+    #[test]
+    fn test_fahrenheit_to_celsius() {
+        let mut temp = Temperature::FahrenheitTemperature(32.0);
+        temp.to_units(&TemperatureUnits::Celsius);
+        assert_eq!(temp, Temperature::CelsiusTemperature(0.0));
+
+        let mut temp = Temperature::FahrenheitTemperature(212.0);
+        temp.to_units(&TemperatureUnits::Celsius);
+        assert_eq!(temp, Temperature::CelsiusTemperature(100.0));
+    }
+
+    #[test]
+    fn test_no_conversion_needed() {
+        let mut temp = Temperature::CelsiusTemperature(25.0);
+        temp.to_units(&TemperatureUnits::Celsius);
+        assert_eq!(temp, Temperature::CelsiusTemperature(25.0));
+
+        let mut temp = Temperature::FahrenheitTemperature(77.0);
+        temp.to_units(&TemperatureUnits::Fahrenheit);
+        assert_eq!(temp, Temperature::FahrenheitTemperature(77.0));
+    }
 }

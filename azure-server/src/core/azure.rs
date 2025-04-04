@@ -29,7 +29,7 @@ mod private {
     ///
     /// ## Returns
     /// Returns an instance of `IoTHubClient` upon a successful connection.
-    #[allow(unused)]
+    #[expect(unused)]
     async fn get_hub() -> Result<IoTHubClient> {
         let hostname = std::env::var("IOTHUB_HOSTNAME")?;
         let device_id = std::env::var("DEVICE_ID")?;
@@ -137,7 +137,7 @@ mod private {
                                 None => continue,
                             };
 
-                            let response = match reqwest::Client::new().post(&endpoint).send().await
+                            let response = match reqwest::Client::new().put(&endpoint).send().await
                             {
                                 Ok(res) => res,
                                 Err(err) => {
@@ -158,9 +158,9 @@ mod private {
                             info!("Received direct method {:?}", msg);
 
                             let endpoint = if msg.method_name.eq_ignore_ascii_case("light-on") {
-                                format!("{}/direct-method/light-on", base_url)
+                                format!("{}/direct-method/light/on", base_url)
                             } else if msg.method_name.eq_ignore_ascii_case("light-off") {
-                                format!("{}/direct-method/light-off", base_url)
+                                format!("{}/direct-method/light/off", base_url)
                             } else {
                                 error!("No such direct method: {}", msg.method_name);
                                 continue;

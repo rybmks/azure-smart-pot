@@ -62,7 +62,8 @@ crate::mod_interface! {
     layer wifi;
     layer bh1750;
     layer board;
-
+    layer server;
+    
     own use {
         Sensor,
         OneWireType,
